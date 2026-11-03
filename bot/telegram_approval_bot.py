@@ -87,7 +87,7 @@ def process_callback(u):
   x=state().get('pending') or {}; status='جاهز للنشر الآن' if a=='publish_now' else 'مجدول'
   try:update_status(x,status)
   except Exception as e:print('status update error',repr(e),flush=True)
-  save_state({});send(('🚀 تم تأكيد النشر الآن وإرساله إلى مسار النشر.' if a=='publish_now' else '⏰ تم تأكيد النشر في الموعد التالي: '+f"{x.get('scheduled_date')} — {x.get('publish_time')}")+'\nلن يتم نشر أي محتوى بدون هذا التأكيد.',home());return
+  save_state({});send(('✅ تم تسجيل طلب النشر الآن، وسيظهر إشعار منفصل فقط بعد تأكيد Buffer للنشر الفعلي.' if a=='publish_now' else '⏰ تم تأكيد النشر في الموعد التالي: '+f"{x.get('scheduled_date')} — {x.get('publish_time')}")+'\nلن يتم اعتبار المحتوى منشورًا إلا بعد وصول نتيجة حقيقية.',home());return
 def main():
  off=None
  while True:
