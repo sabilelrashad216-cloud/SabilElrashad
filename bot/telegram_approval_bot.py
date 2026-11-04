@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from quran_workflow.content_extract import extract
 from quran_workflow.airtable_db import create_item, list_items, update_status
-from quran_workflow.buffer_db import publish_media_item
+from quran_workflow.buffer_db import publish_media_item, upload_public
 from render_card import render_card
 TOKEN=os.environ['TELEGRAM_BOT_TOKEN']; ADMIN_CHAT_ID=2021636669; BASE=f'https://api.telegram.org/bot{TOKEN}/'
 ROOT=Path(__file__).resolve().parent; STATE=ROOT/'bot_state.json'; QUEUE=ROOT/'manual_queue.json'; CONFIG=ROOT/'schedule_config.json'
@@ -32,10 +32,17 @@ def next_slot(kind,items):
    if s.get('kind') in (kind,'all') and not any(x.get('scheduled_date')==d and x.get('publish_time')==s.get('time') for x in items):return d,s.get('time','09:00')
  return start.isoformat(),slots[0].get('time','09:00')
 def save_item(item):
- items=list_items(); kind=item.get('kind','qa'); d,t=next_slot(kind,items); item=dict(item); item.update({'kind':kind,'scheduled_date':item.get('scheduled_date') or d,'publish_time':item.get('publish_time') or t,'airtable_status':'مجدول','id':item.get('id') or f'content-{int(time.time())}'})
+ items=list_items(); kind=item.get('kind','qa'); d,t=next_slot(kind,items); item=dict(item); item.update({'kind':kind,'scheduled_date':item.get('scheduled_date') or d,'publish_time':item.get('publish_time') or t,'airtable_status':'معتمد','id':item.get('id') or f'content-{int(time.time())}'})
  rid,_=create_item(item); item['record_id']=rid
  local=json.loads(QUEUE.read_text()) if QUEUE.exists() else []; local.append(item); QUEUE.write_text(json.dumps(local,ensure_ascii=False,indent=2)); return item
 def summary(x):return f"القسم: {kind_name(x.get('kind'))}\n\n{x.get('main_text','')}\n\nالشرح: {x.get('explanation') or 'غير موجود'}\n\nالمصدر: {x.get('source') or 'غير محدد'}\n\nالموعد التالي: {x.get('scheduled_date') or 'غير محدد'} — {x.get('publish_time') or ''}"
+
+def send_preview(x):
+ output=ROOT/f'preview_{int(time.time())}.png'
+ render_card(x.get('kind','qa'),x.get('main_text',''),x.get('explanation',''),x.get('source',''),output)
+ url=upload_public(output);x['preview_url']=url
+ markup={'inline_keyboard':[[{'text':'✅ اعتماد وحفظ','callback_data':'upload_save'},{'text':'✏️ تعديل','callback_data':'upload_edit'}],[{'text':'❌ رفض','callback_data':'cancel'}]]}
+ api('sendPhoto',chat_id=ADMIN_CHAT_ID,photo=url,caption='معاينة الكادر الذي سيُنشر. راجع النص كاملًا قبل الحفظ.',reply_markup=json.dumps(markup,ensure_ascii=False))
 
 def send_contents(filter_status=None):
  items=list_items(); items=[x for x in items if not filter_status or x.get('airtable_status')==filter_status]
@@ -58,8 +65,8 @@ def download_photo(m):
 def handle_upload(x):
  if not x.get('main_text'):send('لم أستطع استخراج نص واضح. أرسل النص أو صورة أوضح.',cancel());return
  if not x.get('explanation'):
-  save_state({'step':'upload_explanation','pending':x});send('أرسل التفسير أو الشرح، أو اضغط إلغاء.',cancel());return
- save_state({'step':'upload_confirm','pending':x});send('راجع المحتوى قبل الحفظ في Airtable:\n\n'+summary(x),{'inline_keyboard':[[{'text':'✅ حفظ في القاعدة','callback_data':'upload_save'},{'text':'✏️ تعديل','callback_data':'upload_edit'}],[{'text':'❌ إلغاء','callback_data':'cancel'}]]})
+  save_state({'step':'upload_optional_explanation','pending':x});send('هل يوجد تفسير أو شرح؟ أرسله الآن، أو اضغط «بدون شرح» للانتقال إلى معاينة الصورة.',{'inline_keyboard':[[{'text':'✅ بدون شرح — معاينة','callback_data':'upload_no_explanation'}],[{'text':'❌ إلغاء','callback_data':'cancel'}]]});return
+ save_state({'step':'upload_confirm','pending':x});send_preview(x);save_state({'step':'upload_confirm','pending':x})
 def send_publish_items(kind):
  items=[x for x in list_items(kind) if x.get('airtable_status') not in ('تم النشر','published')]
  if not items:send(f'لا يوجد محتوى في قسم {kind_name(kind)}.',home());return
@@ -98,6 +105,8 @@ def process_message(m):
   CONFIG.write_text(json.dumps({'slots':[{'time':t,'kind':k} for t,k in zip(s['times'],vals)]},ensure_ascii=False,indent=2),encoding='utf-8');save_state({});send('✅ تم حفظ المواعيد:\n'+'\n'.join(f'{t} — {kind_name(k)}' for t,k in zip(s['times'],vals)),home());return
  if s.get('step')=='upload_explanation':
   x=s.get('pending') or {};x['explanation']=text;save_state({'step':'upload_confirm','pending':x});send('راجع المحتوى قبل الحفظ في Airtable:\n\n'+summary(x),{'inline_keyboard':[[{'text':'✅ حفظ في القاعدة','callback_data':'upload_save'},{'text':'❌ إلغاء','callback_data':'cancel'}]]});return
+ if s.get('step')=='upload_optional_explanation':
+  x=s.get('pending') or {};x['explanation']=text;save_state({'step':'upload_confirm','pending':x});send_preview(x);save_state({'step':'upload_confirm','pending':x});return
  if s.get('step')=='upload_content':
   try:handle_upload(extract(text=text,expected_kind=s.get('kind')))
   except Exception as e:print('extract error',repr(e),flush=True);send('حدث خطأ في قراءة المحتوى. أرسله مرة أخرى.',cancel())
@@ -116,7 +125,9 @@ def process_callback(u):
  if a.startswith('publish|'):
   send_publish_items(a.split('|')[1]);return
  if a=='upload_save':
-  x=state().get('pending') or {};saved=save_item(x);save_state({});send('✅ تم تحميل المحتوى وحفظه في Airtable.\n\n'+summary(saved),home());return
+  x=state().get('pending') or {};saved=save_item(x);save_state({});send('✅ تم اعتماد المحتوى وحفظه في Airtable.\n\nسيظهر الآن داخل «📤 نشر محتوى» لاختياره لاحقًا.',home());return
+ if a=='upload_no_explanation':
+  x=state().get('pending') or {};x['explanation']='';save_state({'step':'upload_confirm','pending':x});send_preview(x);save_state({'step':'upload_confirm','pending':x});return
  if a=='upload_edit':save_state({'step':'upload_content','kind':(state().get('pending') or {}).get('kind','qa')});send('أرسل النسخة المعدلة:',cancel());return
  if a.startswith('pick|'):
   _,kind,rid=a.split('|',2);x=next((x for x in list_items(kind) if x.get('record_id')==rid),None)
