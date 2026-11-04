@@ -44,8 +44,11 @@ def send_preview(x):
  markup={'inline_keyboard':[[{'text':'✅ اعتماد وحفظ','callback_data':'upload_save'},{'text':'✏️ تعديل','callback_data':'upload_edit'}],[{'text':'❌ رفض','callback_data':'cancel'}]]}
  api('sendPhoto',chat_id=ADMIN_CHAT_ID,photo=url,caption='معاينة الكادر الذي سيُنشر. راجع النص كاملًا قبل الحفظ.',reply_markup=json.dumps(markup,ensure_ascii=False))
 
-def send_contents(filter_status=None):
- items=list_items(); items=[x for x in items if not filter_status or x.get('airtable_status')==filter_status]
+def database_menu():
+ return {'inline_keyboard':[[{'text':'📖 القرآن الكريم','callback_data':'db|quran|all'}],[{'text':'📜 الأحاديث','callback_data':'db|hadith|all'}],[{'text':'❓ سؤال وجواب','callback_data':'db|qa|all'}],[{'text':'⏳ بانتظار المراجعة','callback_data':'db|all|بانتظار المراجعة'},{'text':'✅ المعتمد','callback_data':'db|all|معتمد'}],[{'text':'🗓 المجدول','callback_data':'db|all|مجدول'},{'text':'🚀 تم النشر','callback_data':'db|all|تم النشر'}],[{'text':'❌ إلغاء','callback_data':'cancel'}]]}
+
+def send_contents(kind=None,filter_status=None):
+ items=list_items(kind if kind in ('quran','hadith','qa') else None); items=[x for x in items if (not filter_status or x.get('airtable_status')==filter_status)]
  if not items:send('لا يوجد محتوى بهذا التصنيف.',home());return
  groups={'quran':[],'hadith':[],'qa':[]}
  for x in items:groups.setdefault(x.get('kind','qa'),[]).append(x)
@@ -79,8 +82,8 @@ def process_message(m):
  if text in ('/start','/menu','القائمة'):save_state({});send('اختر العملية:',home());return
  if text=='⬆️ تحميل محتوى':save_state({'step':'upload_kind'});send('اختر القسم الذي سيُحفظ فيه المحتوى:',sections('upload'));return
  if text=='📤 نشر محتوى':save_state({'step':'publish_kind'});send('اختر القسم الذي تريد النشر منه:',sections('publish'));return
- if text=='📚 القاعدة':send_contents();return
- if text=='⏳ للمراجعة':send_contents('بانتظار المراجعة');return
+ if text=='📚 القاعدة':send('اختر القسم أو حالة المحتوى:',database_menu());return
+ if text=='⏳ للمراجعة':send_contents(filter_status='بانتظار المراجعة');return
  if text=='🗓 محتوى اليوم':
   today=date.today().isoformat(); items=[x for x in list_items() if x.get('scheduled_date')==today]
   send('🗓 محتوى اليوم:\n\n'+('\n'.join(f'{i+1}. {kind_name(x.get("kind"))} — {(x.get("main_text") or "")[:120]}' for i,x in enumerate(items)) if items else 'لا يوجد محتوى مجدول اليوم.'),home());return
@@ -107,19 +110,21 @@ def process_message(m):
   x=s.get('pending') or {};x['explanation']=text;save_state({'step':'upload_confirm','pending':x});send('راجع المحتوى قبل الحفظ في Airtable:\n\n'+summary(x),{'inline_keyboard':[[{'text':'✅ حفظ في القاعدة','callback_data':'upload_save'},{'text':'❌ إلغاء','callback_data':'cancel'}]]});return
  if s.get('step')=='upload_optional_explanation':
   x=s.get('pending') or {};x['explanation']=text;save_state({'step':'upload_confirm','pending':x});send_preview(x);save_state({'step':'upload_confirm','pending':x});return
+ if m.get('photo') and s.get('step')=='upload_content':
+  try:handle_upload(extract(text=m.get('caption'),image_bytes=download_photo(m),expected_kind=s.get('kind')))
+  except Exception as e:print('photo error',repr(e),flush=True);send('تعذر قراءة الصورة الآن. أرسل صورة أوضح أو النص كتابةً.',cancel())
+  return
  if s.get('step')=='upload_content':
   try:handle_upload(extract(text=text,expected_kind=s.get('kind')))
   except Exception as e:print('extract error',repr(e),flush=True);send('حدث خطأ في قراءة المحتوى. أرسله مرة أخرى.',cancel())
-  return
- if m.get('photo') and s.get('step')=='upload_content':
-  try:handle_upload(extract(text=m.get('caption'),image_bytes=download_photo(m),expected_kind=s.get('kind')))
-  except Exception as e:print('photo error',repr(e),flush=True);send('تعذر قراءة الصورة.',cancel())
   return
 def process_callback(u):
  c=u.get('callback_query');
  if not c or c.get('message',{}).get('chat',{}).get('id')!=ADMIN_CHAT_ID:return
  a=c.get('data','');api('answerCallbackQuery',callback_query_id=c['id'])
  if a=='cancel':save_state({});send('تم الإلغاء.',home());return
+ if a.startswith('db|'):
+  _,kind,status=a.split('|',2);send_contents(kind=None if kind=='all' else kind,filter_status=None if status=='all' else status);return
  if a.startswith('upload|'):
   kind=a.split('|')[1];save_state({'step':'upload_content','kind':kind});send(f'أرسل محتوى {kind_name(kind)} الآن نصًا أو صورة:',cancel());return
  if a.startswith('publish|'):
