@@ -14,7 +14,7 @@ def send(text,markup=None):
  d={'chat_id':ADMIN_CHAT_ID,'text':text}
  if markup:d['reply_markup']=json.dumps(markup,ensure_ascii=False)
  return api('sendMessage',**d)
-def home():return {'keyboard':[[{'text':'⬆️ تحميل محتوى'},{'text':'📤 نشر محتوى'}]],'resize_keyboard':True,'is_persistent':True}
+def home():return {'keyboard':[[{'text':'⬆️ تحميل محتوى'},{'text':'📤 نشر محتوى'}],[{'text':'⏰ المواعيد'},{'text':'🗓 محتوى اليوم'}],[{'text':'📚 القاعدة'},{'text':'⏳ للمراجعة'}]],'resize_keyboard':True,'is_persistent':True}
 def cancel():return {'inline_keyboard':[[{'text':'❌ إلغاء','callback_data':'cancel'}]]}
 def sections(action):return {'inline_keyboard':[[{'text':'📖 قرآن','callback_data':f'{action}|quran'},{'text':'📜 حديث','callback_data':f'{action}|hadith'}],[{'text':'❓ سؤال وجواب','callback_data':f'{action}|qa'}],[{'text':'❌ إلغاء','callback_data':'cancel'}]]}
 def state():return json.loads(STATE.read_text(encoding='utf-8')) if STATE.exists() else {}
@@ -36,6 +36,20 @@ def save_item(item):
  rid,_=create_item(item); item['record_id']=rid
  local=json.loads(QUEUE.read_text()) if QUEUE.exists() else []; local.append(item); QUEUE.write_text(json.dumps(local,ensure_ascii=False,indent=2)); return item
 def summary(x):return f"القسم: {kind_name(x.get('kind'))}\n\n{x.get('main_text','')}\n\nالشرح: {x.get('explanation') or 'غير موجود'}\n\nالمصدر: {x.get('source') or 'غير محدد'}\n\nالموعد التالي: {x.get('scheduled_date') or 'غير محدد'} — {x.get('publish_time') or ''}"
+
+def send_contents(filter_status=None):
+ items=list_items(); items=[x for x in items if not filter_status or x.get('airtable_status')==filter_status]
+ if not items:send('لا يوجد محتوى بهذا التصنيف.',home());return
+ groups={'quran':[],'hadith':[],'qa':[]}
+ for x in items:groups.setdefault(x.get('kind','qa'),[]).append(x)
+ chunks=[]
+ for k in ('quran','hadith','qa'):
+  if groups[k]:chunks.append('【'+kind_name(k)+'】\n'+'\n'.join(f'{i+1}. {(x.get("main_text") or "")[:120]} — {x.get("airtable_status") or "بدون حالة"}' for i,x in enumerate(groups[k])))
+ send('📚 محتوى القاعدة\n\n'+'\n\n'.join(chunks),home())
+
+def schedule_text():
+ try:return json.loads(CONFIG.read_text(encoding='utf-8')) if CONFIG.exists() else {'slots':[{'time':'09:00','kind':'quran'},{'time':'20:00','kind':'hadith'}]}
+ except:return {'slots':[]}
 def download_photo(m):
  photos=m.get('photo') or []
  if not photos:return None
@@ -58,7 +72,30 @@ def process_message(m):
  if text in ('/start','/menu','القائمة'):save_state({});send('اختر العملية:',home());return
  if text=='⬆️ تحميل محتوى':save_state({'step':'upload_kind'});send('اختر القسم الذي سيُحفظ فيه المحتوى:',sections('upload'));return
  if text=='📤 نشر محتوى':save_state({'step':'publish_kind'});send('اختر القسم الذي تريد النشر منه:',sections('publish'));return
+ if text=='📚 القاعدة':send_contents();return
+ if text=='⏳ للمراجعة':send_contents('بانتظار المراجعة');return
+ if text=='🗓 محتوى اليوم':
+  today=date.today().isoformat(); items=[x for x in list_items() if x.get('scheduled_date')==today]
+  send('🗓 محتوى اليوم:\n\n'+('\n'.join(f'{i+1}. {kind_name(x.get("kind"))} — {(x.get("main_text") or "")[:120]}' for i,x in enumerate(items)) if items else 'لا يوجد محتوى مجدول اليوم.'),home());return
+ if text=='⏰ المواعيد':
+  slots=schedule_text().get('slots',[]); save_state({'step':'schedule_count'})
+  send('⏰ المواعيد الحالية:\n'+('\n'.join(f'{s.get("time")} — {kind_name(s.get("kind"))}' for s in slots) if slots else 'لا توجد')+'\n\nأرسل عدد المواعيد الجديد (مثال: 2) أو اضغط إلغاء.',cancel());return
  if text=='❌ إلغاء':save_state({});send('تم الإلغاء.',home());return
+ if s.get('step')=='schedule_count':
+  try:n=int(text)
+  except:n=0
+  if not 1<=n<=4:send('اكتب رقمًا من 1 إلى 4.',cancel());return
+  save_state({'step':'schedule_times','count':n});send(f'أرسل {n} وقتًا مفصولًا بفاصلة، مثال: 09:00, 20:00',cancel());return
+ if s.get('step')=='schedule_times':
+  times=[v.strip() for v in text.replace('،',',').split(',') if v.strip()]
+  if len(times)!=s.get('count') or any(len(v)!=5 or v[2]!=':' for v in times):send('صيغة الوقت يجب أن تكون HH:MM وبنفس العدد.',cancel());return
+  save_state({'step':'schedule_kinds','times':times,'count':s['count']});send('أرسل الأقسام بنفس الترتيب: قرآن, حديث, سؤال وجواب',cancel());return
+ if s.get('step')=='schedule_kinds':
+  vals=[]
+  for v in text.replace('،',',').split(','):
+   vals.append('quran' if 'قر' in v else 'hadith' if 'حد' in v else 'qa' if 'سؤال' in v or 'جواب' in v else '')
+  if len(vals)!=s.get('count') or any(not v for v in vals):send('اكتب قرآن أو حديث أو سؤال وجواب لكل موعد.',cancel());return
+  CONFIG.write_text(json.dumps({'slots':[{'time':t,'kind':k} for t,k in zip(s['times'],vals)]},ensure_ascii=False,indent=2),encoding='utf-8');save_state({});send('✅ تم حفظ المواعيد:\n'+'\n'.join(f'{t} — {kind_name(k)}' for t,k in zip(s['times'],vals)),home());return
  if s.get('step')=='upload_explanation':
   x=s.get('pending') or {};x['explanation']=text;save_state({'step':'upload_confirm','pending':x});send('راجع المحتوى قبل الحفظ في Airtable:\n\n'+summary(x),{'inline_keyboard':[[{'text':'✅ حفظ في القاعدة','callback_data':'upload_save'},{'text':'❌ إلغاء','callback_data':'cancel'}]]});return
  if s.get('step')=='upload_content':

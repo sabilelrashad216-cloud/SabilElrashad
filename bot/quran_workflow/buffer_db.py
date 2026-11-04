@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import urllib.request
 
 API = 'https://api.buffer.com'
@@ -46,10 +47,9 @@ def upload_public(path):
     result = subprocess.run(['manus-upload-file', str(path)], capture_output=True, text=True, timeout=60)
     if result.returncode != 0:
         raise RuntimeError(result.stderr[-500:] or result.stdout[-500:])
-    for line in reversed(result.stdout.splitlines()):
-        line = line.strip()
-        if line.startswith('http://') or line.startswith('https://'):
-            return line
+    matches = re.findall(r'https?://[^\s]+', result.stdout + '\n' + result.stderr)
+    if matches:
+        return matches[-1].rstrip('.,)')
     raise RuntimeError('لم يعثر رفع الملف على رابط عام')
 
 
