@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from quran_workflow.content_extract import extract
 from quran_workflow.airtable_db import create_item, list_items, update_status
-from quran_workflow.buffer_db import publish_image_item
+from quran_workflow.buffer_db import publish_media_item
 from render_card import render_card
 TOKEN=os.environ['TELEGRAM_BOT_TOKEN']; ADMIN_CHAT_ID=2021636669; BASE=f'https://api.telegram.org/bot{TOKEN}/'
 ROOT=Path(__file__).resolve().parent; STATE=ROOT/'bot_state.json'; QUEUE=ROOT/'manual_queue.json'; CONFIG=ROOT/'schedule_config.json'
@@ -89,14 +89,14 @@ def process_callback(u):
   x=state().get('pending') or {}; output=ROOT/f'card_{x.get("record_id", int(time.time()))}.png'
   try:
    render_card(x.get('kind','qa'),x.get('main_text',''),x.get('explanation',''),x.get('source',''),output)
-   image_url,results=publish_image_item(x,output,['facebook','tiktok'],mode='shareNow' if a=='publish_now' else 'addToQueue')
+   image_url,video_url,results=publish_media_item(x,output,mode='shareNow' if a=='publish_now' else 'addToQueue')
    ok=[r['service'] for r in results if r.get('post')]
    skipped=[f"{r['service']}: {r['skipped']}" for r in results if r.get('skipped')]
    if ok:update_status(x,'تم النشر' if a=='publish_now' else 'مجدول')
    save_state({})
-   msg=('✅ تم نشر الكادر فعليًا الآن على: '+', '.join(ok) if a=='publish_now' else '⏰ تم جدولة الكادر في Buffer على: '+', '.join(ok))
+   msg=('✅ تم نشر الصورة والفيديو فعليًا الآن على: '+', '.join(ok) if a=='publish_now' else '⏰ تم جدولة الصورة والفيديو في Buffer على: '+', '.join(ok))
    if skipped:msg+='\n\nملاحظة: '+'؛ '.join(skipped)
-   send(msg+'\n\nرابط الصورة العامة: '+image_url,home())
+   send(msg+'\n\nتم تجهيز نسخة الصورة ونسخة الفيديو العمودي 1080×1920.',home())
   except Exception as e:
    print('publish error',repr(e),flush=True);send('❌ لم يتم النشر. Buffer لم يؤكد العملية:\n'+str(e),home())
   return
