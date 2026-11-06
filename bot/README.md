@@ -1,18 +1,31 @@
-# Sabil El Rashad Telegram Bot
+# تشغيل بوت سبيل الرشاد على Windows
 
-Telegram workflow for uploading Quran, Hadith, and Q&A content to Airtable and publishing only after an explicit Telegram approval.
+هذا المجلد يشغّل البوت على اللاب بدل Sandbox. سيعمل البوت طالما Windows والإنترنت يعملان.
 
-## Publishing safety
+## التشغيل الأول
 
-Every approved item is rendered into the fixed 1080x1350 Arabic card before Buffer is called. Raw text is never sent to Facebook or TikTok. The bot reports success only after Buffer returns a real post ID. YouTube is intentionally skipped for image-only cards because Shorts requires a video asset.
+1. ثبّت Python 3.11 أو أحدث من: https://www.python.org/downloads/windows/ مع تفعيل **Add Python to PATH**.
+2. ثبّت FFmpeg وأضف مجلد `bin` إلى PATH؛ الفيديو العمودي يحتاج `ffmpeg.exe`.
+3. شغّل `setup_windows.bat`.
+4. افتح ملف `.env` في Notepad وضع القيم السرية، ثم احفظه. لا ترفعه إلى GitHub.
+5. شغّل `start_bot.bat`.
 
-## Environment
+ملف `start_bot.bat` يعيد تشغيل البوت تلقائيًا بعد أي توقف. لإيقافه أغلق نافذة التشغيل أو اضغط Ctrl+C.
 
-Set `TELEGRAM_BOT_TOKEN`, `AIRTABLE_PAT`, `AIRTABLE_BASE_ID`, `BUFFER_API_KEY`, `BUFFER_FACEBOOK_CHANNEL_ID`, `BUFFER_TIKTOK_CHANNEL_ID`, and `BUFFER_YOUTUBE_CHANNEL_ID`. Never commit `.env` or tokens.
+## التشغيل بعد إغلاق النافذة
 
-## Run
+ضع اختصارًا إلى `start_bot.bat` داخل مجلد Startup في Windows عبر:
 
-```bash
-cd bot
-PYTHONPATH=. python3 telegram_approval_bot.py
+```text
+Win + R ثم اكتب: shell:startup
 ```
+
+بعد ذلك سيبدأ البوت تلقائيًا عند تسجيل الدخول إلى Windows.
+
+## أين تحفظ الأشياء؟
+
+- الكود: GitHub.
+- المحتوى: Airtable.
+- التشغيل: اللاب.
+- الأسرار: ملف `.env` على اللاب فقط.
+- لا تشغّل نسخة Sandbox ونسخة اللاب في الوقت نفسه بنفس Telegram Bot Token.
