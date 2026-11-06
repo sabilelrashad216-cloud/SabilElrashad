@@ -6,7 +6,7 @@ from quran_workflow.airtable_db import create_item, list_items, update_status
 from quran_workflow.buffer_db import publish_media_item, upload_public
 from render_card import render_card
 
-TOKEN=os.environ['TELEGRAM_BOT_TOKEN']; ADMIN_CHAT_ID=2021636669; BASE=f'https://api.telegram.org/bot{TOKEN}/'
+TOKEN=os.environ['TELEGRAM_BOT_TOKEN']; ADMIN_CHAT_ID=int(os.environ.get('TELEGRAM_ADMIN_CHAT_ID','2021636669')); BASE=f'https://api.telegram.org/bot{TOKEN}/'
 ROOT=Path(__file__).resolve().parent; STATE=ROOT/'bot_state.json'; QUEUE=ROOT/'manual_queue.json'; CONFIG=ROOT/'schedule_config.json'; PAGE_SIZE=10
 
 def cleanup_file(file_path):
@@ -108,7 +108,10 @@ def handle_upload(x):
     save_state({'step':'upload_confirm','pending':x});send_preview(x);save_state({'step':'upload_confirm','pending':x})
 
 def process_message(m):
-    if (m.get('chat') or {}).get('id')!=ADMIN_CHAT_ID:return
+    incoming_chat=(m.get('chat') or {}).get('id')
+    if incoming_chat!=ADMIN_CHAT_ID:
+        print(f'ignored Telegram message from chat_id={incoming_chat}; expected configured admin chat',flush=True)
+        return
     text=(m.get('text') or '').strip(); s=state()
     if text in ('/start','/menu','القائمة'):save_state({});send('اختر العملية:',home());return
     if text=='⬆️ تحميل محتوى':save_state({'step':'upload_kind'});send('اختر القسم الذي سيُحفظ فيه المحتوى:',sections('upload'));return
